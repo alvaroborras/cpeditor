@@ -131,12 +131,22 @@ void CodeEditor::updateCompletion()
 
     auto *completionPopup = completer->popup();
     auto palette = completionPopup->palette();
-    palette.setColor(QPalette::Base, getEditorColor(KSyntaxHighlighting::Theme::BackgroundColor));
-    palette.setColor(QPalette::Text, getTextColor(KSyntaxHighlighting::Theme::Normal));
-    palette.setColor(QPalette::Highlight, getEditorColor(KSyntaxHighlighting::Theme::TextSelection));
-    palette.setColor(QPalette::HighlightedText, getTextColor(KSyntaxHighlighting::Theme::Normal));
+    for (const auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
+    {
+        palette.setColor(group, QPalette::Base, getEditorColor(KSyntaxHighlighting::Theme::BackgroundColor));
+        palette.setColor(group, QPalette::Text, getTextColor(KSyntaxHighlighting::Theme::Normal));
+        palette.setColor(group, QPalette::Highlight, getEditorColor(KSyntaxHighlighting::Theme::TextSelection));
+        palette.setColor(group, QPalette::HighlightedText, getTextColor(KSyntaxHighlighting::Theme::Normal));
+    }
     completionPopup->setPalette(palette);
     completionPopup->setAutoFillBackground(true);
+    completionPopup->setStyleSheet(
+        QString("QListView { background-color: %1; color: %2; border: 1px solid %3; }"
+                "QListView::item { padding: 2px 6px; }"
+                "QListView::item:selected { background-color: %4; color: %5; }")
+            .arg(palette.color(QPalette::Base).name(), palette.color(QPalette::Text).name(),
+                 palette.color(QPalette::Mid).name(), palette.color(QPalette::Highlight).name(),
+                 palette.color(QPalette::HighlightedText).name()));
 
     completer->setCompletionPrefix(completionPrefix());
     if (completer->completionCount() == 0)
@@ -144,7 +154,10 @@ void CodeEditor::updateCompletion()
         completer->popup()->hide();
         return;
     }
-
+    const int visibleRows = qMin(completer->completionCount(), completer->maxVisibleItems());
+    const int rowHeight = qMax(completionPopup->sizeHintForRow(0), fontMetrics().lineSpacing()) + 4;
+    completionPopup->setMinimumHeight(rowHeight * visibleRows + 2 * completionPopup->frameWidth());
+    completionPopup->setMinimumWidth(qMax(completionPopup->sizeHintForColumn(0) + 16, 180));
     completer->complete(cursorRect());
 }
 
