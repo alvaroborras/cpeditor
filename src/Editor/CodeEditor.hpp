@@ -48,6 +48,7 @@
 #include <QCompleter>
 #include <utility>
 
+class QTimer;
 namespace KSyntaxHighlighting
 {
 class SyntaxHighlighter;
@@ -276,7 +277,9 @@ class CodeEditor : public QPlainTextEdit
 
   private:
     void insertCompletion(const QString &completion);
+    void insertCompletion(const QModelIndex &index);
     QString completionPrefix() const;
+    bool completionContextIsValid() const;
     void updateCompletion();
     /**
      * @brief Method for getting character under
@@ -362,6 +365,7 @@ class CodeEditor : public QPlainTextEdit
 
     QString language;
     QCompleter *completer = nullptr;
+    QTimer *completionTimer = nullptr;
     LanguageRepository *languageRepo;
 
     friend class CodeEditorSidebar;

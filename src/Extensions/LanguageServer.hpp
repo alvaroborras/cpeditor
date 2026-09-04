@@ -48,7 +48,7 @@ class LanguageServer : public QObject
 
   private slots:
     void onLSPServerNotificationArrived(QString const &method, QJsonObject const &param);
-    void onLSPServerResponseArrived(QJsonObject const &method, QJsonObject const &param);
+    void onLSPServerResponseArrived(QJsonObject const &id, QJsonObject const &response);
     void onLSPServerRequestArrived(QString const &method, QJsonObject const &param, QJsonObject const &id);
     void onLSPServerErrorArrived(QJsonObject const &id, QJsonObject const &error);
     void onLSPServerProcessError(QProcess::ProcessError const &error);
@@ -68,6 +68,11 @@ class LanguageServer : public QObject
     LSPClient *lsp = nullptr;
     LSPCompleter *completer = nullptr;
     bool isInitialized = false;
+    QString synchronizedText;
+    bool completionRequestInFlight = false;
+    QString completionRequestText;
+    int completionRequestLine = -1;
+    int completionRequestCharacter = -1;
     QString language;
     QString openFile;
 };

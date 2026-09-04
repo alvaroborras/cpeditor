@@ -15,6 +15,7 @@
  *
  */
 #include "LanguageServer.hpp"
+#include <algorithm>
 #include "Extensions/LSPCompleter.hpp"
 #include "Core/EventLogger.hpp"
 #include "Core/MessageLogger.hpp"
@@ -88,6 +89,7 @@ void LanguageServer::openDocument(QString const &path, Editor::CodeEditor *edito
     }
 
     lsp->didOpen(uri, code, lang);
+    synchronizedText = QString::fromStdString(code);
 }
 
 void LanguageServer::closeDocument()
@@ -103,41 +105,58 @@ void LanguageServer::closeDocument()
     logger = nullptr;
     m_editor = nullptr;
     completer = nullptr;
+    synchronizedText.clear();
+    completionRequestInFlight = false;
+    completionRequestText.clear();
+    completionRequestLine = -1;
+    completionRequestCharacter = -1;
 }
 
 void LanguageServer::requestLinting()
 {
     if (m_editor == nullptr || !isDocumentOpen())
         return;
+    const auto currentText = m_editor->toPlainText();
+    if (currentText == synchronizedText)
+        return;
 
     std::vector<TextDocumentContentChangeEvent> changes;
     TextDocumentContentChangeEvent e;
-    e.text = m_editor->toPlainText().toStdString();
+    e.text = currentText.toStdString();
     changes.push_back(e);
 
-    std::string uri = "file://" + openFile.toStdString();
+    const std::string uri = "file://" + openFile.toStdString();
     lsp->didChange(uri, changes, true);
+    synchronizedText = currentText;
 }
 void LanguageServer::requestCompletion(int lineNumber, int characterNumber, LSPCompleter *completionTarget)
 {
     if (m_editor == nullptr || !isDocumentOpen() || completionTarget == nullptr)
         return;
-
-    // Completion must be requested after the latest editor contents have reached the server.
-    std::vector<TextDocumentContentChangeEvent> changes;
-    TextDocumentContentChangeEvent change;
-    change.text = m_editor->toPlainText().toStdString();
-    changes.push_back(change);
+    if (completionRequestInFlight)
+        return;
 
     const std::string uri = "file://" + openFile.toStdString();
-    lsp->didChange(uri, changes, false);
-
+    const auto currentText = m_editor->toPlainText();
+    if (currentText != synchronizedText)
+    {
+        std::vector<TextDocumentContentChangeEvent> changes;
+        TextDocumentContentChangeEvent change;
+        change.text = currentText.toStdString();
+        changes.push_back(change);
+        lsp->didChange(uri, changes, false);
+        synchronizedText = currentText;
+    }
     completer = completionTarget;
     Position position;
     position.line = lineNumber;
     position.character = characterNumber;
     CompletionContext context;
     context.triggerKind = CompletionTriggerKind::Invoked;
+    completionRequestInFlight = true;
+    completionRequestText = currentText;
+    completionRequestLine = lineNumber;
+    completionRequestCharacter = characterNumber;
     lsp->completion(uri, position, context);
 }
 
@@ -283,40 +302,97 @@ void LanguageServer::onLSPServerNotificationArrived(QString const &method, QJson
     }
 }
 
-void LanguageServer::onLSPServerResponseArrived(QJsonObject const &method, // NOLINT: It can be made static.
-                                                QJsonObject const &param)
+void LanguageServer::onLSPServerResponseArrived(QJsonObject const &id, QJsonObject const &response)
 {
-    Q_UNUSED(method);
-
+    Q_UNUSED(id);
     // The initialize response is also delivered through this signal.
-    if (param.contains("capabilities"))
+    if (response.contains("capabilities"))
     {
         lsp->initialized();
         return;
     }
-
-    if (completer == nullptr || !param.contains("items"))
+    if (!completionRequestInFlight || completer == nullptr || m_editor == nullptr)
         return;
+    completionRequestInFlight = false;
+    if (m_editor->toPlainText() != completionRequestText || m_editor->textCursor().blockNumber() != completionRequestLine ||
+        m_editor->textCursor().positionInBlock() != completionRequestCharacter)
+    {
+        completer->clearCompletion();
+        return;
+    }
 
-    const auto items = param.value("items").toArray();
-    QStringList completions;
+    const auto items = response.value("items").toArray();
+
+    auto stripSnippet = [](QString text) {
+        QRegularExpression placeholder(R"(\$\{\d+:([^{}]*)\})");
+        QRegularExpression choice(R"(\$\{\d+\|([^}]*)\})");
+        QRegularExpression tabstop(R"(\$\d+)");
+        QRegularExpressionMatch match;
+        while ((match = placeholder.match(text)).hasMatch())
+            text.replace(match.capturedStart(), match.capturedLength(), match.captured(1));
+        while ((match = choice.match(text)).hasMatch())
+            text.replace(match.capturedStart(), match.capturedLength(), match.captured(1).section(',', 0, 0));
+        text.remove(tabstop);
+        text.replace("\\\\$", "$");
+        return text;
+    };
+
+    auto readPosition = [](const QJsonObject &object, int &line, int &character) {
+        if (!object.contains("line") || !object.contains("character"))
+            return false;
+        line = object.value("line").toInt(-1);
+        character = object.value("character").toInt(-1);
+        return line >= 0 && character >= 0;
+    };
+
+    QVector<CompletionItem> completions;
     for (const auto &value : items)
     {
         const auto item = value.toObject();
-        QString text = item.value("textEdit").toObject().value("newText").toString();
-        if (text.isEmpty())
-            text = item.value("insertText").toString();
-        if (text.isEmpty())
-            text = item.value("label").toString();
+        CompletionItem completion;
+        completion.label = item.value("label").toString();
+        completion.insertText = item.value("insertText").toString();
+        completion.filterText = item.value("filterText").toString();
+        completion.sortText = item.value("sortText").toString();
+        completion.detail = item.value("detail").toString();
 
-        // Convert the common LSP snippet form to plain text for QCompleter.
-        text.replace(QRegularExpression("\\$\\{[0-9]+:([^}]*)\\}"), "\\1");
-        text.remove(QRegularExpression("\\$[0-9]+"));
-        text.replace("\\\\$", "$");
-        if (!text.isEmpty() && !completions.contains(text))
-            completions.append(text);
+        const auto documentation = item.value("documentation");
+        if (documentation.isString())
+            completion.documentation = documentation.toString();
+        else if (documentation.isObject())
+            completion.documentation = documentation.toObject().value("value").toString();
+
+        const auto textEdit = item.value("textEdit").toObject();
+        const auto newText = textEdit.value("newText").toString();
+        if (!newText.isEmpty())
+            completion.insertText = newText;
+        if (!completion.insertText.isEmpty() && completion.label.isEmpty())
+            completion.label = completion.insertText;
+        if (completion.insertText.isEmpty())
+            completion.insertText = completion.label;
+        if (completion.label.isEmpty())
+            continue;
+
+        const auto range = textEdit.value("range").toObject();
+        completion.hasTextEdit = readPosition(range.value("start").toObject(), completion.startLine,
+                                               completion.startCharacter) &&
+                                 readPosition(range.value("end").toObject(), completion.endLine,
+                                               completion.endCharacter);
+        completion.isSnippet = item.value("insertTextFormat").toInt() == 2;
+        if (completion.isSnippet)
+            completion.insertText = stripSnippet(completion.insertText);
+        completions.append(completion);
     }
-
+    if (std::any_of(completions.cbegin(), completions.cend(), [](const CompletionItem &completion) {
+            return !completion.sortText.isEmpty();
+        }))
+    {
+        std::stable_sort(completions.begin(), completions.end(), [](const CompletionItem &left, const CompletionItem &right) {
+            const auto leftKey = left.sortText.isEmpty() ? left.label : left.sortText;
+            const auto rightKey = right.sortText.isEmpty() ? right.label : right.sortText;
+            return leftKey < rightKey;
+        });
+    }
     completer->setCompletions(completions);
 }
 
@@ -328,6 +404,7 @@ void LanguageServer::onLSPServerRequestArrived(QString const &method, // NOLINT:
 
 void LanguageServer::onLSPServerErrorArrived(QJsonObject const &id, QJsonObject const &error)
 {
+    completionRequestInFlight = false;
     QString ID;
     QString ERR;
     ID = QJsonDocument::fromVariant(id.toVariantMap()).toJson();

@@ -7,27 +7,22 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * I will not be responsible if CP Editor behaves in unexpected way and
- * causes your ratings to go down and or lose any important contest.
- *
- * Believe Software is "Software" and it isn't immune to bugs.
- *
  */
-
 #include "LSPCompleter.hpp"
 #include <QAbstractItemView>
 #include <QFrame>
-#include <QStringListModel>
+#include <QStandardItem>
+#include <QStandardItemModel>
 
 namespace Extensions
 {
 LSPCompleter::LSPCompleter(QObject *parent) : QCompleter(parent)
 {
-    model = new QStringListModel(this);
+    model = new QStandardItemModel(this);
     setModel(model);
     setCompletionMode(QCompleter::PopupCompletion);
     setModelSorting(QCompleter::UnsortedModel);
+    setCompletionRole(Qt::UserRole + 1);
     setCaseSensitivity(Qt::CaseSensitive);
     setWrapAround(true);
     setMaxVisibleItems(12);
@@ -43,11 +38,31 @@ LSPCompleter::LSPCompleter(QObject *parent) : QCompleter(parent)
 
 void LSPCompleter::clearCompletion()
 {
-    model->setStringList({});
+    completionItems.clear();
+    model->clear();
 }
 
-void LSPCompleter::setCompletions(const QStringList &items)
+void LSPCompleter::setCompletions(const QVector<CompletionItem> &items)
 {
-    model->setStringList(items);
+    completionItems = items;
+    model->clear();
+    for (int i = 0; i < completionItems.size(); ++i)
+    {
+        const auto &completion = completionItems.at(i);
+        auto *item = new QStandardItem(completion.label);
+        item->setData(i, Qt::UserRole);
+        item->setData(completion.filterText.isEmpty() ? completion.label : completion.filterText, Qt::UserRole + 1);
+        item->setData(completion.detail.isEmpty() ? completion.documentation : completion.detail, Qt::ToolTipRole);
+        model->appendRow(item);
+    }
+}
+
+CompletionItem LSPCompleter::completionForIndex(const QModelIndex &index) const
+{
+    bool ok = false;
+    const int itemIndex = index.data(Qt::UserRole).toInt(&ok);
+    if (ok && itemIndex >= 0 && itemIndex < completionItems.size())
+        return completionItems.at(itemIndex);
+    return {};
 }
 } // namespace Extensions

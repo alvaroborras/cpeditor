@@ -7,22 +7,33 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * I will not be responsible if CP Editor behaves in unexpected way and
- * causes your ratings to go down and or lose any important contest.
- *
- * Believe Software is "Software" and it isn't immune to bugs.
- *
  */
 #ifndef LSP_COMPLETER_HPP
 #define LSP_COMPLETER_HPP
 
 #include <QCompleter>
+#include <QVector>
 
-class QStringListModel;
+class QStandardItemModel;
 
 namespace Extensions
 {
+struct CompletionItem
+{
+    QString label;
+    QString insertText;
+    QString detail;
+    QString documentation;
+    QString filterText;
+    QString sortText;
+    bool hasTextEdit = false;
+    bool isSnippet = false;
+    int startLine = -1;
+    int startCharacter = -1;
+    int endLine = -1;
+    int endCharacter = -1;
+};
+
 class LSPCompleter : public QCompleter
 {
     Q_OBJECT
@@ -31,10 +42,12 @@ class LSPCompleter : public QCompleter
     explicit LSPCompleter(QObject *parent = nullptr);
 
     void clearCompletion();
-    void setCompletions(const QStringList &items);
+    void setCompletions(const QVector<CompletionItem> &items);
+    CompletionItem completionForIndex(const QModelIndex &index) const;
 
   private:
-    QStringListModel *model = nullptr;
+    QStandardItemModel *model = nullptr;
+    QVector<CompletionItem> completionItems;
 };
 } // namespace Extensions
 

@@ -40,6 +40,7 @@
 */
 
 #include "Editor/CodeEditor.hpp"
+#include "Extensions/LSPCompleter.hpp"
 #include "Core/EventLogger.hpp"
 #include "Editor/CodeEditorSideBar.hpp"
 #include "Editor/HighLighter.hpp"
@@ -80,6 +81,11 @@ CodeEditor::CodeEditor(QWidget *widget) : QPlainTextEdit(widget)
     setCenterOnScroll(true);
     setMouseTracking(true);
 
+    completionTimer = new QTimer(this);
+    completionTimer->setSingleShot(true);
+    completionTimer->setInterval(200);
+    connect(completionTimer, &QTimer::timeout, this, &CodeEditor::completionRequested);
+
     QTimer::singleShot(0, [this] {
         updateSidebarGeometry();
         sideBar->update();
@@ -89,6 +95,7 @@ CodeEditor::CodeEditor(QWidget *widget) : QPlainTextEdit(widget)
 
 void CodeEditor::setCompleter(QCompleter *newCompleter)
 {
+    completionTimer->stop();
     if (completer == newCompleter)
         return;
 
@@ -103,8 +110,8 @@ void CodeEditor::setCompleter(QCompleter *newCompleter)
         return;
 
     completer->setWidget(this);
-    connect(completer, QOverload<const QString &>::of(&QCompleter::activated), this,
-            &CodeEditor::insertCompletion);
+    connect(completer, QOverload<const QModelIndex &>::of(&QCompleter::activated), this,
+            QOverload<const QModelIndex &>::of(&CodeEditor::insertCompletion));
     connect(completer->popup(), &QAbstractItemView::entered, this, [this](const QModelIndex &index) {
         if (completer != nullptr && completer->widget() == this)
             completer->setCurrentRow(index.row());
@@ -121,6 +128,59 @@ QString CodeEditor::completionPrefix() const
     const auto cursor = textCursor();
     const auto beforeCursor = cursor.block().text().left(cursor.positionInBlock());
     return QRegularExpression("[A-Za-z_][A-Za-z0-9_]*$").match(beforeCursor).captured();
+}
+
+bool CodeEditor::completionContextIsValid() const
+{
+    const auto text = toPlainText();
+    const auto cursorPosition = textCursor().position();
+    bool inBlockComment = false;
+    bool inLineComment = false;
+    QChar quote;
+    bool escaped = false;
+    for (int i = 0; i < cursorPosition && i < text.size(); ++i)
+    {
+        const auto character = text.at(i);
+        const auto next = i + 1 < text.size() ? text.at(i + 1) : QChar();
+        if (inLineComment)
+        {
+            if (character == '\n')
+                inLineComment = false;
+            continue;
+        }
+        if (inBlockComment)
+        {
+            if (character == '*' && next == '/')
+            {
+                inBlockComment = false;
+                ++i;
+            }
+            continue;
+        }
+        if (!quote.isNull())
+        {
+            if (escaped)
+                escaped = false;
+            else if (character == '\\')
+                escaped = true;
+            else if (character == quote)
+                quote = QChar();
+            continue;
+        }
+        if (character == '/' && next == '/')
+        {
+            inLineComment = true;
+            ++i;
+        }
+        else if (character == '/' && next == '*')
+        {
+            inBlockComment = true;
+            ++i;
+        }
+        else if (character == '"' || character == '\'')
+            quote = character;
+    }
+    return !inLineComment && !inBlockComment && quote.isNull();
 }
 
 void CodeEditor::showCompletion()
@@ -176,6 +236,45 @@ void CodeEditor::insertCompletion(const QString &completion)
     cursor.insertText(completion);
     setTextCursor(cursor);
     completer->popup()->hide();
+}
+
+void CodeEditor::insertCompletion(const QModelIndex &index)
+{
+    if (completer == nullptr || completer->widget() != this || !index.isValid())
+        return;
+
+    if (auto *lspCompleter = qobject_cast<Extensions::LSPCompleter *>(completer))
+    {
+        const auto completion = lspCompleter->completionForIndex(index);
+        if (!completion.label.isEmpty())
+        {
+            auto cursor = textCursor();
+            if (completion.hasTextEdit)
+            {
+                const auto startBlock = document()->findBlockByNumber(completion.startLine);
+                const auto endBlock = document()->findBlockByNumber(completion.endLine);
+                if (startBlock.isValid() && endBlock.isValid())
+                {
+                    const int start = qBound(startBlock.position(), startBlock.position() + completion.startCharacter,
+                                               startBlock.position() + startBlock.length());
+                    const int end = qBound(endBlock.position(), endBlock.position() + completion.endCharacter,
+                                             endBlock.position() + endBlock.length());
+                    cursor.setPosition(start);
+                    cursor.setPosition(end, QTextCursor::KeepAnchor);
+                }
+            }
+            else
+            {
+                cursor.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor,
+                                    completionPrefix().length());
+            }
+            cursor.insertText(completion.insertText.isEmpty() ? completion.label : completion.insertText);
+            setTextCursor(cursor);
+            completer->popup()->hide();
+            return;
+        }
+    }
+    insertCompletion(index.data().toString());
 }
 
 
@@ -953,7 +1052,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
         if (e->key() == Qt::Key_Tab && e->modifiers() == Qt::NoModifier)
         {
             if (completer->currentIndex().isValid())
-                insertCompletion(completer->currentCompletion());
+                insertCompletion(completer->currentIndex());
             else
                 completer->popup()->hide();
             e->accept();
@@ -969,6 +1068,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
 
     if (e->key() == Qt::Key_Space && e->modifiers() == Qt::ControlModifier)
     {
+        completionTimer->stop();
         emit completionRequested();
         e->accept();
         return;
@@ -1233,10 +1333,14 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
     e->setModifiers(e->modifiers() | (shift ? Qt::ShiftModifier : Qt::NoModifier));
 
     QPlainTextEdit::keyPressEvent(e);
-    if (mayRequestCompletion)
-        emit completionRequested();
-    else if (completer != nullptr && !e->text().isEmpty() && e->text().at(0).isSpace())
-        completer->popup()->hide();
+    if (mayRequestCompletion && completionPrefix().size() >= 2 && completionContextIsValid())
+        completionTimer->start();
+    else
+    {
+        completionTimer->stop();
+        if (completer != nullptr && completer->popup()->isVisible())
+            completer->popup()->hide();
+    }
 }
 
 bool CodeEditor::event(QEvent *event)
