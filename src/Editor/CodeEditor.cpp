@@ -105,6 +105,10 @@ void CodeEditor::setCompleter(QCompleter *newCompleter)
     completer->setWidget(this);
     connect(completer, QOverload<const QString &>::of(&QCompleter::activated), this,
             &CodeEditor::insertCompletion);
+    connect(completer->popup(), &QAbstractItemView::entered, this, [this](const QModelIndex &index) {
+        if (completer != nullptr && completer->widget() == this)
+            completer->setCurrentRow(index.row());
+    });
     if (completer->model() != nullptr)
     {
         connect(completer->model(), &QAbstractItemModel::modelReset, this, &CodeEditor::updateCompletion);
@@ -946,7 +950,7 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
             e->accept();
             return;
         }
-        if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter || e->key() == Qt::Key_Tab)
+        if (e->key() == Qt::Key_Tab && e->modifiers() == Qt::NoModifier)
         {
             if (completer->currentIndex().isValid())
                 insertCompletion(completer->currentCompletion());
@@ -954,6 +958,12 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
                 completer->popup()->hide();
             e->accept();
             return;
+        }
+        if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter)
+        {
+            completer->popup()->hide();
+            // Mark Enter as handled so QCompleter cannot activate its current item.
+            e->accept();
         }
     }
 

@@ -37,6 +37,7 @@ LSPCompleter::LSPCompleter(QObject *parent) : QCompleter(parent)
     completionPopup->setLineWidth(1);
     completionPopup->setAutoFillBackground(true);
     completionPopup->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    completionPopup->setMouseTracking(true);
     completionPopup->setTextElideMode(Qt::ElideRight);
 }
 
