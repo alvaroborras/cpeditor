@@ -107,6 +107,7 @@ void LanguageServer::closeDocument()
     completer = nullptr;
     synchronizedText.clear();
     completionRequestInFlight = false;
+    completionRequestPending = false;
     completionRequestText.clear();
     completionRequestLine = -1;
     completionRequestCharacter = -1;
@@ -134,7 +135,11 @@ void LanguageServer::requestCompletion(int lineNumber, int characterNumber, LSPC
     if (m_editor == nullptr || !isDocumentOpen() || completionTarget == nullptr)
         return;
     if (completionRequestInFlight)
+    {
+        completionRequestPending = true;
         return;
+    }
+    completionRequestPending = false;
 
     const std::string uri = "file://" + openFile.toStdString();
     const auto currentText = m_editor->toPlainText();
@@ -314,8 +319,18 @@ void LanguageServer::onLSPServerResponseArrived(QJsonObject const &id, QJsonObje
     if (!completionRequestInFlight || completer == nullptr || m_editor == nullptr)
         return;
     completionRequestInFlight = false;
-    if (m_editor->toPlainText() != completionRequestText || m_editor->textCursor().blockNumber() != completionRequestLine ||
-        m_editor->textCursor().positionInBlock() != completionRequestCharacter)
+    const bool requestIsCurrent =
+        m_editor->toPlainText() == completionRequestText && m_editor->textCursor().blockNumber() == completionRequestLine &&
+        m_editor->textCursor().positionInBlock() == completionRequestCharacter;
+    if (completionRequestPending)
+    {
+        completionRequestPending = false;
+        completer->clearCompletion();
+        const auto cursor = m_editor->textCursor();
+        requestCompletion(cursor.blockNumber(), cursor.positionInBlock(), completer);
+        return;
+    }
+    if (!requestIsCurrent)
     {
         completer->clearCompletion();
         return;

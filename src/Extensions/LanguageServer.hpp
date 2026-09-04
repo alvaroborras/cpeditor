@@ -70,6 +70,7 @@ class LanguageServer : public QObject
     bool isInitialized = false;
     QString synchronizedText;
     bool completionRequestInFlight = false;
+    bool completionRequestPending = false;
     QString completionRequestText;
     int completionRequestLine = -1;
     int completionRequestCharacter = -1;
