@@ -24,8 +24,10 @@ struct CompletionItem
     QString insertText;
     QString detail;
     QString documentation;
+    QString labelDescription;
     QString filterText;
     QString sortText;
+    int kind = 0;
     bool hasTextEdit = false;
     bool isSnippet = false;
     int startLine = -1;

@@ -354,7 +354,12 @@ void LanguageServer::onLSPServerResponseArrived(QJsonObject const &id, QJsonObje
         completion.insertText = item.value("insertText").toString();
         completion.filterText = item.value("filterText").toString();
         completion.sortText = item.value("sortText").toString();
+        completion.kind = item.value("kind").toInt();
         completion.detail = item.value("detail").toString();
+        const auto labelDetails = item.value("labelDetails").toObject();
+        completion.labelDescription = labelDetails.value("description").toString();
+        if (completion.detail.isEmpty())
+            completion.detail = labelDetails.value("detail").toString();
 
         const auto documentation = item.value("documentation");
         if (documentation.isString())
