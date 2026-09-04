@@ -46,6 +46,7 @@ namespace Extensions
 class CompanionServer;
 struct CompanionData;
 class LanguageServer;
+class LSPCompleter;
 class WakaTime;
 } // namespace Extensions
 
@@ -211,6 +212,9 @@ class AppWindow : public QMainWindow
 
     void onTabContextMenuRequested(const QPoint &pos);
 
+    void requestCompletion(MainWindow *window);
+
+
     void onEditorTextChanged(MainWindow *window);
 
     void updateLanguageServerFilePath(MainWindow *window, const QString &path);
@@ -267,6 +271,7 @@ class AppWindow : public QMainWindow
     Extensions::LanguageServer *cppServer = nullptr;
     Extensions::LanguageServer *javaServer = nullptr;
     Extensions::LanguageServer *pythonServer = nullptr;
+    Extensions::LSPCompleter *lspCompleter = nullptr;
 
     Extensions::WakaTime *wakaTime = nullptr;
 

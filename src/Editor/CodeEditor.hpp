@@ -45,6 +45,7 @@
 #include "HighLighter.hpp"
 #include <KSyntaxHighlighting/Theme>
 #include <QPlainTextEdit>
+#include <QCompleter>
 #include <utility>
 
 namespace KSyntaxHighlighting
@@ -87,6 +88,12 @@ class CodeEditor : public QPlainTextEdit
      * @param widget Pointer to parent widget.
      */
     explicit CodeEditor(QWidget *widget = nullptr);
+
+    /** Attach the completion popup used by the language server. */
+    void setCompleter(QCompleter *newCompleter);
+
+    /** Show completions for the identifier at the cursor. */
+    void showCompletion();
 
     /**
      * @brief Method for getting first visible block
@@ -184,6 +191,10 @@ class CodeEditor : public QPlainTextEdit
      */
     void toggleBlockComment();
 
+  signals:
+    /** Emitted when the current cursor position should be sent to the language server. */
+    void completionRequested();
+
   protected:
     /**
      * @brief Method, that's called on any text insertion of
@@ -264,6 +275,9 @@ class CodeEditor : public QPlainTextEdit
     void highlightCurrentLine();
 
   private:
+    void insertCompletion(const QString &completion);
+    QString completionPrefix() const;
+    void updateCompletion();
     /**
      * @brief Method for getting character under
      * cursor.
@@ -347,7 +361,7 @@ class CodeEditor : public QPlainTextEdit
     CodeEditorSidebar *sideBar = nullptr;
 
     QString language;
-
+    QCompleter *completer = nullptr;
     LanguageRepository *languageRepo;
 
     friend class CodeEditorSidebar;

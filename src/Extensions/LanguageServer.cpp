@@ -15,6 +15,7 @@
  *
  */
 #include "LanguageServer.hpp"
+#include "Extensions/LSPCompleter.hpp"
 #include "Core/EventLogger.hpp"
 #include "Core/MessageLogger.hpp"
 #include "Settings/SettingsManager.hpp"
@@ -24,6 +25,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 
 namespace Extensions
 {
@@ -100,6 +102,7 @@ void LanguageServer::closeDocument()
     openFile = "";
     logger = nullptr;
     m_editor = nullptr;
+    completer = nullptr;
 }
 
 void LanguageServer::requestLinting()
@@ -114,6 +117,28 @@ void LanguageServer::requestLinting()
 
     std::string uri = "file://" + openFile.toStdString();
     lsp->didChange(uri, changes, true);
+}
+void LanguageServer::requestCompletion(int lineNumber, int characterNumber, LSPCompleter *completionTarget)
+{
+    if (m_editor == nullptr || !isDocumentOpen() || completionTarget == nullptr)
+        return;
+
+    // Completion must be requested after the latest editor contents have reached the server.
+    std::vector<TextDocumentContentChangeEvent> changes;
+    TextDocumentContentChangeEvent change;
+    change.text = m_editor->toPlainText().toStdString();
+    changes.push_back(change);
+
+    const std::string uri = "file://" + openFile.toStdString();
+    lsp->didChange(uri, changes, false);
+
+    completer = completionTarget;
+    Position position;
+    position.line = lineNumber;
+    position.character = characterNumber;
+    CompletionContext context;
+    context.triggerKind = CompletionTriggerKind::Invoked;
+    lsp->completion(uri, position, context);
 }
 
 bool LanguageServer::isDocumentOpen() const
@@ -261,7 +286,38 @@ void LanguageServer::onLSPServerNotificationArrived(QString const &method, QJson
 void LanguageServer::onLSPServerResponseArrived(QJsonObject const &method, // NOLINT: It can be made static.
                                                 QJsonObject const &param)
 {
-    LOG_INFO("Response from Server has arrived");
+    Q_UNUSED(method);
+
+    // The initialize response is also delivered through this signal.
+    if (param.contains("capabilities"))
+    {
+        lsp->initialized();
+        return;
+    }
+
+    if (completer == nullptr || !param.contains("items"))
+        return;
+
+    const auto items = param.value("items").toArray();
+    QStringList completions;
+    for (const auto &value : items)
+    {
+        const auto item = value.toObject();
+        QString text = item.value("textEdit").toObject().value("newText").toString();
+        if (text.isEmpty())
+            text = item.value("insertText").toString();
+        if (text.isEmpty())
+            text = item.value("label").toString();
+
+        // Convert the common LSP snippet form to plain text for QCompleter.
+        text.replace(QRegularExpression("\\$\\{[0-9]+:([^}]*)\\}"), "\\1");
+        text.remove(QRegularExpression("\\$[0-9]+"));
+        text.replace("\\\\$", "$");
+        if (!text.isEmpty() && !completions.contains(text))
+            completions.append(text);
+    }
+
+    completer->setCompletions(completions);
 }
 
 void LanguageServer::onLSPServerRequestArrived(QString const &method, // NOLINT: It can be made static.

@@ -49,7 +49,9 @@
 #include "generated/SettingsHelper.hpp"
 #include <KSyntaxHighlighting/Definition>
 #include <KSyntaxHighlighting/Format>
+#include <QAbstractItemView>
 #include <QApplication>
+#include <QCompleter>
 #include <QFontDatabase>
 #include <QMimeData>
 #include <QPainter>
@@ -84,6 +86,72 @@ CodeEditor::CodeEditor(QWidget *widget) : QPlainTextEdit(widget)
         viewport()->update();
     });
 }
+
+void CodeEditor::setCompleter(QCompleter *newCompleter)
+{
+    if (completer == newCompleter)
+        return;
+
+    if (completer != nullptr)
+    {
+        completer->popup()->hide();
+        completer->setWidget(nullptr);
+    }
+
+    completer = newCompleter;
+    if (completer == nullptr)
+        return;
+
+    completer->setWidget(this);
+    connect(completer, QOverload<const QString &>::of(&QCompleter::activated), this,
+            &CodeEditor::insertCompletion);
+    if (completer->model() != nullptr)
+    {
+        connect(completer->model(), &QAbstractItemModel::modelReset, this, &CodeEditor::updateCompletion);
+        connect(completer->model(), &QAbstractItemModel::rowsInserted, this, &CodeEditor::updateCompletion);
+    }
+}
+
+QString CodeEditor::completionPrefix() const
+{
+    const auto cursor = textCursor();
+    const auto beforeCursor = cursor.block().text().left(cursor.positionInBlock());
+    return QRegularExpression("[A-Za-z_][A-Za-z0-9_]*$").match(beforeCursor).captured();
+}
+
+void CodeEditor::showCompletion()
+{
+    updateCompletion();
+}
+
+void CodeEditor::updateCompletion()
+{
+    if (completer == nullptr || completer->widget() != this || completer->model() == nullptr)
+        return;
+
+    completer->setCompletionPrefix(completionPrefix());
+    if (completer->completionCount() == 0)
+    {
+        completer->popup()->hide();
+        return;
+    }
+
+    completer->complete(cursorRect());
+}
+
+void CodeEditor::insertCompletion(const QString &completion)
+{
+    if (completer == nullptr || completer->widget() != this)
+        return;
+
+    auto cursor = textCursor();
+    cursor.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor,
+                        completionPrefix().length());
+    cursor.insertText(completion);
+    setTextCursor(cursor);
+    completer->popup()->hide();
+}
+
 
 void CodeEditor::applySettings(const QString &lang)
 {
@@ -848,6 +916,37 @@ int CodeEditor::getFirstVisibleBlock()
 
 void CodeEditor::keyPressEvent(QKeyEvent *e)
 {
+    if (completer != nullptr && completer->popup()->isVisible())
+    {
+        if (e->key() == Qt::Key_Escape)
+        {
+            completer->popup()->hide();
+            e->accept();
+            return;
+        }
+        if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter || e->key() == Qt::Key_Tab)
+        {
+            if (completer->currentIndex().isValid())
+                insertCompletion(completer->currentCompletion());
+            else
+                completer->popup()->hide();
+            e->accept();
+            return;
+        }
+    }
+
+    if (e->key() == Qt::Key_Space && e->modifiers() == Qt::ControlModifier)
+    {
+        emit completionRequested();
+        e->accept();
+        return;
+    }
+
+    const bool mayRequestCompletion =
+        (e->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == Qt::NoModifier &&
+        (e->key() == Qt::Key_Backspace || e->key() == Qt::Key_Delete ||
+         (!e->text().isEmpty() && (e->text().at(0).isLetterOrNumber() || e->text().at(0) == '_' ||
+                                    e->text().at(0) == ':' || e->text().at(0) == '.')));
     /* if(m_vimCursor) */
     /* { */
     /*     QPlainTextEdit::keyPressEvent(e); */
@@ -1102,6 +1201,10 @@ void CodeEditor::keyPressEvent(QKeyEvent *e)
     e->setModifiers(e->modifiers() | (shift ? Qt::ShiftModifier : Qt::NoModifier));
 
     QPlainTextEdit::keyPressEvent(e);
+    if (mayRequestCompletion)
+        emit completionRequested();
+    else if (completer != nullptr && !e->text().isEmpty() && e->text().at(0).isSpace())
+        completer->popup()->hide();
 }
 
 bool CodeEditor::event(QEvent *event)

@@ -27,6 +27,7 @@ class LSPClient;
 
 namespace Extensions
 {
+class LSPCompleter;
 class LanguageServer : public QObject
 {
     Q_OBJECT
@@ -39,6 +40,7 @@ class LanguageServer : public QObject
     void closeDocument();
     void requestLinting();
 
+    void requestCompletion(int lineNumber, int characterNumber, LSPCompleter *completionTarget);
     bool isDocumentOpen() const;
 
     void updateSettings();
@@ -64,6 +66,7 @@ class LanguageServer : public QObject
     Editor::CodeEditor *m_editor = nullptr;
     MessageLogger *logger = nullptr;
     LSPClient *lsp = nullptr;
+    LSPCompleter *completer = nullptr;
     bool isInitialized = false;
     QString language;
     QString openFile;

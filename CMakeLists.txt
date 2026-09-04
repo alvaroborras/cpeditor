@@ -201,6 +201,8 @@ add_executable(cpeditor
     src/Extensions/CodeFormatter.hpp
     src/Extensions/CompanionServer.cpp
     src/Extensions/CompanionServer.hpp
+    src/Extensions/LSPCompleter.cpp
+    src/Extensions/LSPCompleter.hpp
     src/Extensions/LanguageServer.cpp
     src/Extensions/LanguageServer.hpp
     src/Extensions/WakaTime.cpp

@@ -18,6 +18,7 @@
 #include "appwindow.hpp"
 #include "../ui/ui_appwindow.h"
 #include "Core/Compiler.hpp"
+#include "Editor/CodeEditor.hpp"
 #include "Core/EventLogger.hpp"
 #include "Core/MessageLogger.hpp"
 #include "Core/SessionManager.hpp"
@@ -25,6 +26,7 @@
 #include "Core/Translator.hpp"
 #include "Extensions/CFTool.hpp"
 #include "Extensions/CompanionServer.hpp"
+#include "Extensions/LSPCompleter.hpp"
 #include "Extensions/LanguageServer.hpp"
 #include "Extensions/WakaTime.hpp"
 #include "Settings/DefaultPathManager.hpp"
@@ -52,6 +54,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QTabBar>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
 #include <findreplacedialog.h>
@@ -218,6 +221,7 @@ AppWindow::~AppWindow()
     delete cppServer;
     delete pythonServer;
     delete javaServer;
+    delete lspCompleter;
     delete updateChecker;
     delete server;
     delete findReplaceDialog;
@@ -308,6 +312,7 @@ void AppWindow::allocate()
     javaServer = new Extensions::LanguageServer("Java");
     pythonServer = new Extensions::LanguageServer("Python");
 
+    lspCompleter = new Extensions::LSPCompleter(this);
     findReplaceDialog = new FindReplaceDialog(this);
     findReplaceDialog->setModal(false);
     findReplaceDialog->setWindowFlags(Qt::Dialog | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint |
@@ -441,6 +446,9 @@ void AppWindow::openTab(MainWindow *window, MainWindow *after)
     connect(window, &MainWindow::requestUpdateLanguageServerFilePath, this, &AppWindow::updateLanguageServerFilePath);
     connect(window, &MainWindow::editorLanguageChanged, this, &AppWindow::onEditorLanguageChanged);
     connect(window, &MainWindow::editorTextChanged, this, &AppWindow::onEditorTextChanged);
+    connect(window->getEditor(), &Editor::CodeEditor::completionRequested, this, [this, window] {
+        requestCompletion(window);
+    });
     connect(window, &MainWindow::requestToastMessage, trayIcon,
             [this](QString const &head, QString const &body) { trayIcon->showMessage(head, body); });
     connect(window, &MainWindow::compileOrRunTriggered, this, &AppWindow::onCompileOrRunTriggered);
@@ -900,6 +908,11 @@ void AppWindow::onTabChanged(int index)
         if (javaServer->isDocumentOpen())
             javaServer->closeDocument();
 
+        if (lspCompleter != nullptr)
+        {
+            lspCompleter->setWidget(nullptr);
+            lspCompleter->clearCompletion();
+        }
         return;
     }
 
@@ -910,6 +923,8 @@ void AppWindow::onTabChanged(int index)
 
     reAttachLanguageServer(tmp);
 
+    tmp->getEditor()->setCompleter(lspCompleter);
+    lspCompleter->clearCompletion();
     findReplaceDialog->setTextEdit(tmp->getEditor());
 
     setWindowTitle(tmp->getCompleteTitle() + " - CP Editor");
@@ -977,6 +992,35 @@ void AppWindow::onEditorFileChanged()
     }
 }
 
+void AppWindow::requestCompletion(MainWindow *window)
+{
+    if (window == nullptr || window != currentWindow() || lspCompleter == nullptr)
+        return;
+
+    auto *editor = window->getEditor();
+    const auto language = window->getLanguage();
+    if (language == "C++" && SettingsHelper::isLSPUseAutocompleteCpp())
+    {
+        lspCompleter->clearCompletion();
+        editor->showCompletion();
+        const auto cursor = editor->textCursor();
+        cppServer->requestCompletion(cursor.blockNumber(), cursor.positionInBlock(), lspCompleter);
+    }
+    else if (language == "Java" && SettingsHelper::isLSPUseAutocompleteJava())
+    {
+        lspCompleter->clearCompletion();
+        editor->showCompletion();
+        const auto cursor = editor->textCursor();
+        javaServer->requestCompletion(cursor.blockNumber(), cursor.positionInBlock(), lspCompleter);
+    }
+    else if (language == "Python" && SettingsHelper::isLSPUseAutocompletePython())
+    {
+        lspCompleter->clearCompletion();
+        editor->showCompletion();
+        const auto cursor = editor->textCursor();
+        pythonServer->requestCompletion(cursor.blockNumber(), cursor.positionInBlock(), lspCompleter);
+    }
+}
 void AppWindow::onEditorTextChanged(MainWindow *window)
 {
     int index = indexOfWindow(window);

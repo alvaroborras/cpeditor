@@ -785,6 +785,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting C++"
+      },
+      {
+        "name": "LSP/Use Autocomplete C++"
       }
     ],
     "tip": "The path to the C++ Language Server executable"
@@ -799,6 +802,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting Java"
+      },
+      {
+        "name": "LSP/Use Autocomplete Java"
       }
     ],
     "tip": "The path to the Java Language Server executable"
@@ -814,6 +820,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting Python"
+      },
+      {
+        "name": "LSP/Use Autocomplete Python"
       }
     ],
     "tip": "The path to the Python Language Server executable"
@@ -901,6 +910,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting C++"
+      },
+      {
+        "name": "LSP/Use Autocomplete C++"
       }
     ],
     "tip": "Arguments to pass to Language server executable"
@@ -913,6 +925,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting Java"
+      },
+      {
+        "name": "LSP/Use Autocomplete Java"
       }
     ],
     "tip": "Arguments to pass to Language server executable"
@@ -926,6 +941,9 @@
     "depends": [
       {
         "name": "LSP/Use Linting Python"
+      },
+      {
+        "name": "LSP/Use Autocomplete Python"
       }
     ],
     "tip": "Arguments to pass to Language server executable"
