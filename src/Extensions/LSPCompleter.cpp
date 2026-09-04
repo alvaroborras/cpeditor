@@ -16,6 +16,8 @@
  */
 
 #include "LSPCompleter.hpp"
+#include <QAbstractItemView>
+#include <QFrame>
 #include <QStringListModel>
 
 namespace Extensions
@@ -29,6 +31,13 @@ LSPCompleter::LSPCompleter(QObject *parent) : QCompleter(parent)
     setCaseSensitivity(Qt::CaseSensitive);
     setWrapAround(true);
     setMaxVisibleItems(12);
+
+    auto *completionPopup = popup();
+    completionPopup->setFrameShape(QFrame::Box);
+    completionPopup->setLineWidth(1);
+    completionPopup->setAutoFillBackground(true);
+    completionPopup->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    completionPopup->setTextElideMode(Qt::ElideRight);
 }
 
 void LSPCompleter::clearCompletion()

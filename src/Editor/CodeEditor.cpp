@@ -129,6 +129,15 @@ void CodeEditor::updateCompletion()
     if (completer == nullptr || completer->widget() != this || completer->model() == nullptr)
         return;
 
+    auto *completionPopup = completer->popup();
+    auto palette = completionPopup->palette();
+    palette.setColor(QPalette::Base, getEditorColor(KSyntaxHighlighting::Theme::BackgroundColor));
+    palette.setColor(QPalette::Text, getTextColor(KSyntaxHighlighting::Theme::Normal));
+    palette.setColor(QPalette::Highlight, getEditorColor(KSyntaxHighlighting::Theme::TextSelection));
+    palette.setColor(QPalette::HighlightedText, getTextColor(KSyntaxHighlighting::Theme::Normal));
+    completionPopup->setPalette(palette);
+    completionPopup->setAutoFillBackground(true);
+
     completer->setCompletionPrefix(completionPrefix());
     if (completer->completionCount() == 0)
     {
